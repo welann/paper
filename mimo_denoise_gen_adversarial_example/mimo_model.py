@@ -1,9 +1,26 @@
+import os
+import argparse
+from PIL import Image as Image
+
 import torch
 import torch.nn as nn
-from torchvision.transforms import functional as F
+import torch.nn.functional as F
+from torchvision.transforms import functional 
+from torch.utils.data import Dataset, DataLoader
+
 
 class BasicConv(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride, bias=True, norm=False, relu=True, transpose=False):
+    def __init__(
+        self,
+        in_channel,
+        out_channel,
+        kernel_size,
+        stride,
+        bias=True,
+        norm=False,
+        relu=True,
+        transpose=False,
+    ):
         super(BasicConv, self).__init__()
         if bias and norm:
             bias = False
@@ -11,11 +28,28 @@ class BasicConv(nn.Module):
         padding = kernel_size // 2
         layers = list()
         if transpose:
-            padding = kernel_size // 2 -1
-            layers.append(nn.ConvTranspose2d(in_channel, out_channel, kernel_size, padding=padding, stride=stride, bias=bias))
+            padding = kernel_size // 2 - 1
+            layers.append(
+                nn.ConvTranspose2d(
+                    in_channel,
+                    out_channel,
+                    kernel_size,
+                    padding=padding,
+                    stride=stride,
+                    bias=bias,
+                )
+            )
         else:
             layers.append(
-                nn.Conv2d(in_channel, out_channel, kernel_size, padding=padding, stride=stride, bias=bias))
+                nn.Conv2d(
+                    in_channel,
+                    out_channel,
+                    kernel_size,
+                    padding=padding,
+                    stride=stride,
+                    bias=bias,
+                )
+            )
         if norm:
             layers.append(nn.BatchNorm2d(out_channel))
         if relu:
@@ -31,11 +65,12 @@ class ResBlock(nn.Module):
         super(ResBlock, self).__init__()
         self.main = nn.Sequential(
             BasicConv(in_channel, out_channel, kernel_size=3, stride=1, relu=True),
-            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False)
+            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False),
         )
 
     def forward(self, x):
         return self.main(x) + x
+
 
 class EBlock(nn.Module):
     def __init__(self, out_channel, num_res=8):
@@ -65,7 +100,7 @@ class AFF(nn.Module):
         super(AFF, self).__init__()
         self.conv = nn.Sequential(
             BasicConv(in_channel, out_channel, kernel_size=1, stride=1, relu=True),
-            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False)
+            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False),
         )
 
     def forward(self, x1, x2, x4):
@@ -77,10 +112,16 @@ class SCM(nn.Module):
     def __init__(self, out_plane):
         super(SCM, self).__init__()
         self.main = nn.Sequential(
-            BasicConv(3, out_plane//4, kernel_size=3, stride=1, relu=True),
-            BasicConv(out_plane // 4, out_plane // 2, kernel_size=1, stride=1, relu=True),
-            BasicConv(out_plane // 2, out_plane // 2, kernel_size=3, stride=1, relu=True),
-            BasicConv(out_plane // 2, out_plane-3, kernel_size=1, stride=1, relu=True)
+            BasicConv(3, out_plane // 4, kernel_size=3, stride=1, relu=True),
+            BasicConv(
+                out_plane // 4, out_plane // 2, kernel_size=1, stride=1, relu=True
+            ),
+            BasicConv(
+                out_plane // 2, out_plane // 2, kernel_size=3, stride=1, relu=True
+            ),
+            BasicConv(
+                out_plane // 2, out_plane - 3, kernel_size=1, stride=1, relu=True
+            ),
         )
 
         self.conv = BasicConv(out_plane, out_plane, kernel_size=1, stride=1, relu=False)
@@ -99,36 +140,75 @@ class FAM(nn.Module):
         x = x1 * x2
         out = x1 + self.merge(x)
         return out
-    
+
+
 class MIMOUNetPlus(nn.Module):
-    def __init__(self, num_res = 20):
+    def __init__(self, num_res=20):
         super(MIMOUNetPlus, self).__init__()
         base_channel = 32
-        self.Encoder = nn.ModuleList([
-            EBlock(base_channel, num_res),
-            EBlock(base_channel*2, num_res),
-            EBlock(base_channel*4, num_res),
-        ])
+        self.Encoder = nn.ModuleList(
+            [
+                EBlock(base_channel, num_res),
+                EBlock(base_channel * 2, num_res),
+                EBlock(base_channel * 4, num_res),
+            ]
+        )
 
-        self.feat_extract = nn.ModuleList([
-            BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
-            BasicConv(base_channel, base_channel*2, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*2, base_channel*4, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*4, base_channel*2, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel*2, base_channel, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1)
-        ])
+        self.feat_extract = nn.ModuleList(
+            [
+                BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
+                BasicConv(
+                    base_channel, base_channel * 2, kernel_size=3, relu=True, stride=2
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel * 4,
+                    kernel_size=3,
+                    relu=True,
+                    stride=2,
+                ),
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1),
+            ]
+        )
 
-        self.Decoder = nn.ModuleList([
-            DBlock(base_channel * 4, num_res),
-            DBlock(base_channel * 2, num_res),
-            DBlock(base_channel, num_res)
-        ])
+        self.Decoder = nn.ModuleList(
+            [
+                DBlock(base_channel * 4, num_res),
+                DBlock(base_channel * 2, num_res),
+                DBlock(base_channel, num_res),
+            ]
+        )
 
-        self.Convs = nn.ModuleList([
-            BasicConv(base_channel * 4, base_channel * 2, kernel_size=1, relu=True, stride=1),
-            BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1),
-        ])
+        self.Convs = nn.ModuleList(
+            [
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=1,
+                    relu=True,
+                    stride=1,
+                ),
+                BasicConv(
+                    base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1
+                ),
+            ]
+        )
 
         self.ConvsOut = nn.ModuleList(
             [
@@ -137,10 +217,12 @@ class MIMOUNetPlus(nn.Module):
             ]
         )
 
-        self.AFFs = nn.ModuleList([
-            AFF(base_channel * 7, base_channel*1),
-            AFF(base_channel * 7, base_channel*2)
-        ])
+        self.AFFs = nn.ModuleList(
+            [
+                AFF(base_channel * 7, base_channel * 1),
+                AFF(base_channel * 7, base_channel * 2),
+            ]
+        )
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
@@ -183,19 +265,109 @@ class MIMOUNetPlus(nn.Module):
         z = self.Decoder[0](z)
         z_ = self.ConvsOut[0](z)
         z = self.feat_extract[3](z)
-        outputs.append(z_+x_4)
+        outputs.append(z_ + x_4)
 
         z = torch.cat([z, res2], dim=1)
         z = self.Convs[0](z)
         z = self.Decoder[1](z)
         z_ = self.ConvsOut[1](z)
         z = self.feat_extract[4](z)
-        outputs.append(z_+x_2)
+        outputs.append(z_ + x_2)
 
         z = torch.cat([z, res1], dim=1)
         z = self.Convs[1](z)
         z = self.Decoder[2](z)
         z = self.feat_extract[5](z)
-        outputs.append(z+x)
+        outputs.append(z + x)
 
         return outputs
+
+
+class DeblurDataset(Dataset):
+    def __init__(self, image_dir, transform=None, is_test=False):
+        self.image_dir = image_dir
+        self.image_list = os.listdir(os.path.join(image_dir, "blur/"))
+        self._check_image(self.image_list)
+        self.image_list.sort()
+        self.transform = transform
+        self.is_test = is_test
+
+    def __len__(self):
+        return len(self.image_list)
+
+    def __getitem__(self, idx):
+        image = Image.open(os.path.join(self.image_dir, "blur", self.image_list[idx]))
+        label = Image.open(os.path.join(self.image_dir, "sharp", self.image_list[idx]))
+
+        if self.transform:
+            image, label = self.transform(image, label)
+        else:
+            image = functional.to_tensor(image)
+            label = functional.to_tensor(label)
+        if self.is_test:
+            name = self.image_list[idx]
+            return image, label, name
+        return image, label
+
+    @staticmethod
+    def _check_image(lst):
+        for x in lst:
+            splits = x.split(".")
+            if splits[-1] not in ["png", "jpg", "jpeg"]:
+                raise ValueError
+
+
+def test_dataloader(path, batch_size=1, num_workers=0):
+    image_dir = os.path.join(path, "test")
+    dataloader = DataLoader(
+        DeblurDataset(image_dir, is_test=True),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return dataloader
+
+
+def main(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MIMOUNetPlus()
+    state_dict = torch.load(args.model_dir)
+    model.load_state_dict(state_dict["model"])
+    model.to(device)
+    dataloader = test_dataloader(args.data_dir, batch_size=1, num_workers=4)
+    torch.cuda.empty_cache()
+    model.eval()
+    with torch.no_grad():
+
+        # Main Evaluation
+        for iter_idx, data in enumerate(dataloader):
+            input_img, label_img, name = data
+
+            input_img = input_img.to(device)
+
+            pred = model(input_img)[2]
+
+            pred_clip = torch.clamp(pred, 0, 1)
+
+            pred_numpy = pred_clip.squeeze(0).cpu().numpy()
+            label_numpy = label_img.squeeze(0).cpu().numpy()
+
+            print("pred_numpy: ", pred_numpy)
+            print("label_numpy: ", label_numpy)
+            save_name = os.path.join(args.result_dir, name[0])
+            pred_clip += 0.5 / 255
+            pred = functional.to_pil_image(pred_clip.squeeze(0).cpu(), "RGB")
+            pred.save(save_name)
+
+    print("Done")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_dir", default=None, type=str)
+    parser.add_argument("--data_dir", type=str, default="dataset/GOPRO")
+    args = parser.parse_args()
+    args.result_dir = os.path.join('mimounet_results/')
+    main(args)

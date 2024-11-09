@@ -89,53 +89,49 @@ def denoise_image(model, model_dir, data_dir, result_dir, save_image=True):
 
 
 class denoise_net(nn.Module):
-    def __init__(self, model_dir, data_dir, result_dir):
+    def __init__(self, model_dir, result_dir):
         super(denoise_net, self).__init__()
         self.result_dir=result_dir
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        self.dataloader = test_dataloader(data_dir, batch_size=1, num_workers=4)
         
         self.model = MIMOUNetPlus()
         self.model.load_state_dict(torch.load(model_dir)["model"])
         self.model.to(self.device)
         self.model.eval()
 
-    def forward(self, x):
+    def forward(self, input_img,label_img:str):
         with torch.no_grad():
-            # Main Evaluation
-            for iter_idx, data in enumerate(self.dataloader):
-                input_img, label_img, name = data
-                input_img = input_img.to(self.device)
-
-                pred = self.model(input_img)[2]
-
-                pred_clip = torch.clamp(pred, 0, 1)
-
-                save_name = os.path.join(self.result_dir, name[0])
-                pred_clip += 0.5 / 255
-                pred = F.to_pil_image(pred_clip.squeeze(0).cpu(), "RGB")
-                pred.save(save_name)
+            input_img = input_img.to(self.device)
+            pred = self.model(input_img)[2]
+            pred_clip = torch.clamp(pred, 0, 1)
+            save_name = os.path.join(self.result_dir, label_img+".png")
+            pred_clip += 0.5 / 255
+            pred = F.to_pil_image(pred_clip.squeeze(0).cpu(), "RGB")
+            pred.save(save_name)
+        
+            return pred_clip
 
 
 class classify_net(nn.Module):
-    def __init__(self, num_classes=1000, pretrained=False):
+    def __init__(self, num_classes=1000, classify_model_dir=None):
         super(classify_net, self).__init__()
         self.num_classes = num_classes
 
-        model = resnet18(pretrained=pretrained)
+        model = resnet18()
 
         # 如果需要修改分类层的输出类别数
         if num_classes != 1000:
             model.fc = nn.Linear(model.fc.in_features, num_classes)
-
-    def load_pretrained_model(self, path):
-        self.model.load_state_dict(torch.load(path))
+        
+        self.model.load_state_dict(torch.load(classify_model_dir))
         self.model.eval()
-
+        
+        
     def forward(self, x):
-        pass
+        print("classify input image shape: ",x.shape)
+        return self.model(x)
 
 
 class gradient_attack:
@@ -147,6 +143,8 @@ class gradient_attack:
         classify_model=classify_net,
         org_img=None,
         target_label=None,
+        gen_model_dir=None,
+        classify_model_dir=None,
     ):
         self.max_iteration = max_iteration
         self.lr = lr
@@ -154,8 +152,14 @@ class gradient_attack:
         self.classify_model = classify_model
         self.org_img = org_img
         self.target_label = target_label
+        self.gen_model_dir = gen_model_dir
+        self.classify_model_dir = classify_model_dir
+        
 
     def run(self):
+        dnet=self.gen_model(self.gen_model_dir,"./result")
+        cnet=self.classify_model(10,self.classify_model_dir)
+            
         region = self.org_img[:, :224, :224].clone().detach()
         region.requires_grad = True
 
@@ -163,8 +167,9 @@ class gradient_attack:
         optimizer = optim.Adam([region], lr=self.lr)
         for i in range(self.max_iteration):
 
-            denoise_image = denoise_net(self.org_img)
-            classify_result = classify_net(denoise_image)
+            denoise_image = dnet(self.org_img, "org_img_label")
+            region=denoise_image[:, :224, :224]
+            classify_result = cnet(region)
             # 方法1：获取预测的类别（概率最大的类别）
             pred_label = torch.argmax(classify_result, dim=1)  # 对于批处理数据
 
@@ -181,7 +186,7 @@ class gradient_attack:
             loss.backward()
             optimizer.step()
 
-            self.org_img[:, :200, :200] = region.detach()
+            self.org_img[:, :224, :224] = region.detach()
 
         print("攻击失败")
         return self.org_img
