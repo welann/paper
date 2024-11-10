@@ -10,49 +10,9 @@ from torchvision.models import resnet18
 import torchvision.transforms as transforms
 from torchvision.transforms import functional as F
 
-from torch.utils.data import Dataset, DataLoader
 
 from mimo_model import MIMOUNetPlus
 
-class ImageDataset(Dataset):
-    def __init__(self, folder_path, transform=None):
-        self.folder_path = folder_path
-        self.transform = transform
-        # 获取文件夹中所有图片文件的路径
-        self.image_files = [
-            f for f in os.listdir(folder_path) if f.endswith((".png", ".jpg", ".jpeg"))
-        ][
-            :10
-        ]  # 只取前10张
-
-    def __len__(self):
-        return len(self.image_files)
-
-    def __getitem__(self, idx):
-        # 读取图片
-        img_path = os.path.join(self.folder_path, self.image_files[idx])
-        image = Image.open(img_path).convert("RGB")
-
-        # 应用变换
-        if self.transform:
-            image = self.transform(image)
-
-        return image
-
-
-def test_dataloader(image_dir, batch_size=1, num_workers=0):
-    # 定义图像变换
-    transform = transforms.Compose(
-        [
-            transforms.Resize((224, 224)),  # 调整图片大小
-            transforms.ToTensor(),  # 转换为张量
-            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 标准化（可选）
-        ]
-    )
-
-    dataset = ImageDataset(image_dir, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    return dataloader
 
 class denoise_net(nn.Module):
     def __init__(self, model_dir, result_dir):
@@ -60,10 +20,10 @@ class denoise_net(nn.Module):
         self.result_dir=result_dir
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+        print("device: ",self.device)
         
         self.model = MIMOUNetPlus()
-        self.model.load_state_dict(torch.load(model_dir)["model"])
+        self.model.load_state_dict(torch.load(model_dir,map_location=torch.device(self.device),weights_only=True)["model"])
         self.model.to(self.device)
         self.model.eval()
 
@@ -85,21 +45,23 @@ class classify_net(nn.Module):
     def __init__(self, num_classes=1000, classify_model_dir=None):
         super(classify_net, self).__init__()
         self.num_classes = num_classes
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("device: ",device)
+        self.model=torch.load(classify_model_dir,map_location=torch.device(device))
+        # self.model = resnet18()
 
-        model = resnet18()
-
-        # 如果需要修改分类层的输出类别数
-        if num_classes != 1000:
-            model.fc = nn.Linear(model.fc.in_features, num_classes)
+        # # 如果需要修改分类层的输出类别数
+        # if num_classes != 1000:
+        #     self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         
-        self.model.load_state_dict(torch.load(classify_model_dir))
+        # self.model.load_state_dict(torch.load(classify_model_dir,map_location=torch.device('cpu')))
         self.model.eval()
         
         
     def forward(self, x):
+        x=x.unsqueeze(0)
         print("classify input image shape: ",x.shape)
         return self.model(x)
-
 
 class gradient_attack:
     def __init__(
@@ -157,7 +119,6 @@ class gradient_attack:
 
         print("攻击失败")
         return self.org_img
-
 
 def test_gen_net(args):
     image_path=args.image_path
