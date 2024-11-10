@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch import optim
 
 import os
+import argparse
 from PIL import Image
 
 from torchvision.models import resnet18
@@ -53,41 +54,6 @@ def test_dataloader(image_dir, batch_size=1, num_workers=0):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     return dataloader
 
-
-def denoise_image(model, model_dir, data_dir, result_dir, save_image=True):
-    state_dict = torch.load(model_dir)
-    model.load_state_dict(state_dict["model"])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataloader = test_dataloader(data_dir, batch_size=1, num_workers=4)
-    torch.cuda.empty_cache()
-    model.eval()
-    with torch.no_grad():
-        # Hardware warm-up
-        for iter_idx, data in enumerate(dataloader):
-            input_img, label_img, _ = data
-            input_img = input_img.to(device)
-            _ = model(input_img)
-
-            if iter_idx == 20:
-                break
-        # Main Evaluation
-        for iter_idx, data in enumerate(dataloader):
-            input_img, label_img, name = data
-            input_img = input_img.to(device)
-
-            pred = model(input_img)[2]
-
-            pred_clip = torch.clamp(pred, 0, 1)
-
-            if save_image:
-                save_name = os.path.join(result_dir, name[0])
-                pred_clip += 0.5 / 255
-                pred = F.to_pil_image(pred_clip.squeeze(0).cpu(), "RGB")
-                pred.save(save_name)
-
-
-
-
 class denoise_net(nn.Module):
     def __init__(self, model_dir, result_dir):
         super(denoise_net, self).__init__()
@@ -101,6 +67,7 @@ class denoise_net(nn.Module):
         self.model.to(self.device)
         self.model.eval()
 
+    #这里的image，需要to_tensor一下
     def forward(self, input_img,label_img:str):
         with torch.no_grad():
             input_img = input_img.to(self.device)
@@ -190,3 +157,52 @@ class gradient_attack:
 
         print("攻击失败")
         return self.org_img
+
+
+def test_gen_net(args):
+    image_path=args.image_path
+    test_image=Image.open(image_path)
+    test_image_tensor = F.to_tensor(test_image)
+    
+    dnet=denoise_net(args.gen_model_dir,args.result_dir)
+    
+    predict=dnet(test_image_tensor,"test_img_label")
+    print(predict.shape)
+    
+    
+def test_classify_net(args):
+    image_path=args.image_path
+    test_image=Image.open(image_path)
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),  # ResNet-18 需要 224x224 的输入
+        transforms.Grayscale(num_output_channels=3),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
+    test_image_tensor = transform(test_image)
+    print(test_image_tensor.shape)
+    cnet=classify_net(10,args.classify_model_dir)
+    result=cnet(test_image_tensor)
+    print("cnet: ",result)
+    print("cnet argmax: ",torch.argmax(result))
+    
+def test_gradient_attack(args):
+    pass
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", default=2, type=int, choices=[0,1,2])
+    parser.add_argument("--gen_model_dir", default=None, type=str)
+    parser.add_argument("--image_path", default=None, type=str)
+    parser.add_argument("--result_dir", default=None, type=str)
+    parser.add_argument("--classify_model_dir", default=None, type=str)
+    args = parser.parse_args()
+    if args.mode==0:
+        test_gen_net(args)
+    elif args.mode==1:
+        test_classify_net(args)
+    elif args.mode==2:
+        test_gradient_attack(args)
+    else:
+        print("mode is not correct")
+    

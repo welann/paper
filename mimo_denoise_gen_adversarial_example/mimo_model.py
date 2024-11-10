@@ -354,8 +354,8 @@ def main(args):
             pred_numpy = pred_clip.squeeze(0).cpu().numpy()
             label_numpy = label_img.squeeze(0).cpu().numpy()
 
-            print("pred_numpy: ", pred_numpy)
-            print("label_numpy: ", label_numpy)
+            # print("pred_numpy: ", pred_numpy)
+            # print("label_numpy: ", label_numpy)
             save_name = os.path.join(args.result_dir, name[0])
             pred_clip += 0.5 / 255
             pred = functional.to_pil_image(pred_clip.squeeze(0).cpu(), "RGB")
