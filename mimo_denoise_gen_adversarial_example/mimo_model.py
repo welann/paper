@@ -318,9 +318,8 @@ class DeblurDataset(Dataset):
 
 
 def test_dataloader(path, batch_size=1, num_workers=0):
-    image_dir = os.path.join(path, "test")
     dataloader = DataLoader(
-        DeblurDataset(image_dir, is_test=True),
+        DeblurDataset(path, is_test=True),
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
@@ -329,7 +328,13 @@ def test_dataloader(path, batch_size=1, num_workers=0):
 
     return dataloader
 
-
+def test_data_laoder(args):
+    dataloader = test_dataloader(args.data_dir, batch_size=1, num_workers=4)
+    for iter_idx, data in enumerate(dataloader):
+        input_img, label_img, name = data
+        print(input_img.shape)
+        break
+    
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MIMOUNetPlus()
@@ -370,4 +375,5 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="dataset/GOPRO")
     args = parser.parse_args()
     args.result_dir = os.path.join('mimounet_results/')
-    main(args)
+    # main(args)
+    test_data_laoder(args)

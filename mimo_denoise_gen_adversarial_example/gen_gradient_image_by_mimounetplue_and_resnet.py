@@ -59,6 +59,8 @@ class classify_net(nn.Module):
         
         
     def forward(self, x):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x=x.to(device)
         x=x.unsqueeze(0)
         print("classify input image shape: ",x.shape)
         return self.model(x)
@@ -124,7 +126,9 @@ def test_gen_net(args):
     image_path=args.image_path
     test_image=Image.open(image_path)
     test_image_tensor = F.to_tensor(test_image)
+    test_image_tensor = test_image_tensor.unsqueeze(0)
     
+    print(test_image_tensor.shape)
     dnet=denoise_net(args.gen_model_dir,args.result_dir)
     
     predict=dnet(test_image_tensor,"test_img_label")
