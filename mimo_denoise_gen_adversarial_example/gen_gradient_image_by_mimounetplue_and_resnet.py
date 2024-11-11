@@ -139,8 +139,7 @@ class gradient_attack:
             
             target_tensor = torch.zeros(classify_result.shape).to(self.device)
             target_tensor[0, int(self.target_label[0])] = 1.0
-            print("target_tensor", target_tensor)
-            loss = lossfunc(classify_result, target_tensor)
+            loss = -lossfunc(classify_result, target_tensor)
             print(f"{i}. loss: {loss}")
 
             optimizer.zero_grad()
