@@ -97,7 +97,18 @@ class gradient_attack:
 
         region = self.org_img[:, :224, :224].clone().detach()
         region.requires_grad = True
-
+        
+        orginal_label = 0
+        with torch.no_grad():
+            denoise_image = dnet(self.org_img, "org_img_label")
+            region = denoise_image[:, :224, :224].clone().detach()
+            
+            region = region.to(self.device)
+            classify_result = cnet(region)
+            print("classify_result: ", classify_result)
+            orginal_label = torch.argmax(classify_result, dim=1)  # 对于批处理数据
+            print(f"pred_label: {orginal_label}")
+            
         lossfunc = nn.MSELoss()
         optimizer = optim.Adam([region], lr=self.lr)
         for i in range(self.max_iteration):
@@ -109,17 +120,23 @@ class gradient_attack:
             region = denoise_image[:, :224, :224].clone().detach()
             region.requires_grad = True
             classify_result = cnet(region)
-            print("classify_result: ", classify_result)
-            print("self.target_label: ", self.target_label)
-            # 方法1：获取预测的类别（概率最大的类别）
+            # print("classify_result: ", classify_result)
+            # print("self.target_label: ", self.target_label)
             pred_label = torch.argmax(classify_result, dim=1)  # 对于批处理数据
             print(f"pred_label: {pred_label}")
+            
+            if pred_label != orginal_label:
+                res = F.to_pil_image(self.org_img.squeeze(0).cpu(), "RGB")
+                res.save(f"success_{i}.png")
+                print("攻击成功")
+                return self.org_img
             # 判断是否与目标标签相同
             is_successful = pred_label == self.target_label
 
             if is_successful:
                 print(f"攻击成功！在第{i}次尝试后达到目标")
                 return self.org_img
+            
             target_tensor = torch.zeros(classify_result.shape).to(self.device)
             target_tensor[0, int(self.target_label[0])] = 1.0
             print("target_tensor", target_tensor)
@@ -132,6 +149,7 @@ class gradient_attack:
             # print("region: ",region)
             self.org_img[:, :224, :224] = region.detach()
             # print(self.org_img)
+            
         print("攻击失败")
         return self.org_img
 
